@@ -1,200 +1,154 @@
-// 
-// Boost.Process 
-// ~~~~~~~~~~~~~ 
-// 
-// Copyright (c) 2006, 2007 Julio M. Merino Vidal 
-// Copyright (c) 2008, 2009 Boris Schaeling 
-// 
-// Distributed under the Boost Software License, Version 1.0. (See accompanying 
-// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt) 
-// 
+// Copyright (c) 2006, 2007 Julio M. Merino Vidal
+// Copyright (c) 2008 Ilya Sokolov, Boris Schaeling
+// Copyright (c) 2009 Boris Schaeling
+// Copyright (c) 2010 Felipe Tanus, Boris Schaeling
+// Copyright (c) 2011, 2012 Jeff Flinn, Boris Schaeling
+// Copyright (c) 2016 Klemens D. Morgenstern
+//
+// Distributed under the Boost Software License, Version 1.0. (See accompanying
+// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-/** 
- * \file boost/process/child.hpp 
- * 
- * Includes the declaration of the child class. 
- */ 
+/**
+ * \file boost/process/child.hpp
+ *
+ * Defines a child process class.
+ */
 
-#ifndef BOOST_PROCESS_CHILD_HPP 
-#define BOOST_PROCESS_CHILD_HPP 
+#ifndef BOOST_PROCESS_CHILD_HPP
+#define BOOST_PROCESS_CHILD_HPP
 
-#include <boost/process/config.hpp> 
+#include <boost/process/detail/config.hpp>
+#include <boost/process/detail/child_decl.hpp>
+#include <boost/process/detail/execute_impl.hpp>
 
-#if defined(BOOST_POSIX_API) 
-#  include <sys/types.h> 
-#  include <sys/wait.h> 
-#  include <cerrno> 
-#elif defined(BOOST_WINDOWS_API) 
-#  include <windows.h> 
-#else 
-#  error "Unsupported platform." 
-#endif 
+#if defined(BOOST_POSIX_API)
+#include <boost/process/posix.hpp>
+#endif
 
-#include <boost/process/process.hpp> 
-#include <boost/process/pistream.hpp> 
-#include <boost/process/postream.hpp> 
-#include <boost/process/status.hpp> 
-#include <boost/process/detail/file_handle.hpp> 
-#include <boost/system/system_error.hpp> 
-#include <boost/throw_exception.hpp> 
-#include <boost/shared_ptr.hpp> 
-#include <boost/assert.hpp> 
-#include <vector> 
+namespace boost {
 
-namespace boost { 
-namespace process { 
+///The main namespace of boost.process.
+namespace process {
 
-/** 
- * Generic implementation of the Child concept. 
- * 
- * The child class implements the Child concept in an operating system 
- * agnostic way. 
- */ 
-class child : public process 
-{ 
-public: 
-    /** 
-     * Gets a reference to the child's standard input stream. 
-     * 
-     * Returns a reference to a postream object that represents the 
-     * standard input communication channel with the child process. 
-     */ 
-    postream &get_stdin() const 
-    { 
-        BOOST_ASSERT(stdin_); 
+template<typename ...Args>
+child::child(Args&&...args)
+    : child(::boost::process::detail::execute_impl(std::forward<Args>(args)...)) {}
 
-        return *stdin_; 
-    } 
 
-    /** 
-     * Gets a reference to the child's standard output stream. 
-     * 
-     * Returns a reference to a pistream object that represents the 
-     * standard output communication channel with the child process. 
-     */ 
-    pistream &get_stdout() const 
-    { 
-        BOOST_ASSERT(stdout_); 
+///Typedef for the type of an pid_t
+typedef ::boost::process::detail::api::pid_t pid_t;
 
-        return *stdout_; 
-    } 
+#if defined(BOOST_PROCESS_DOXYGEN)
+/** The main class to hold a child process. It is simliar to [std::thread](http://en.cppreference.com/w/cpp/thread/thread),
+ * in that it has a join and detach function.
+ *
+ * @attention The destructor will call terminate on the process if not joined or detached without any warning.
+ *
+ */
 
-    /** 
-     * Gets a reference to the child's standard error stream. 
-     * 
-     * Returns a reference to a pistream object that represents the 
-     * standard error communication channel with the child process. 
-     */ 
-    pistream &get_stderr() const 
-    { 
-        BOOST_ASSERT(stderr_); 
+class child
+{
+    /** Type definition for the native process handle. */
+    typedef platform_specific native_handle_t;
 
-        return *stderr_; 
-    } 
+    /** Construct the child from a pid.
+     *
+     * @attention There is no guarantee that this will work. The process need the right access rights, which are very platform specific.
+     */
+    explicit child(pid_t & pid) : _child_handle(pid) {};
 
-    /** 
-     * Blocks and waits for the child process to terminate. 
-     * 
-     * Returns a status object that represents the child process' 
-     * finalization condition. The child process object ceases to be 
-     * valid after this call. 
-     * 
-     * \remark Blocking remarks: This call blocks if the child 
-     *         process has not finalized execution and waits until 
-     *         it terminates. 
-     */ 
-    status wait() 
-    { 
-#if defined(BOOST_POSIX_API) 
-        int s; 
-        if (::waitpid(get_id(), &s, 0) == -1) 
-            boost::throw_exception(boost::system::system_error(boost::system::error_code(errno, boost::system::get_system_category()), "boost::process::child::wait: waitpid(2) failed")); 
-        return status(s); 
-#elif defined(BOOST_WINDOWS_API) 
-        ::WaitForSingleObject(process_handle_.get(), INFINITE); 
-        DWORD code; 
-        if (!::GetExitCodeProcess(process_handle_.get(), &code)) 
-            boost::throw_exception(boost::system::system_error(boost::system::error_code(::GetLastError(), boost::system::get_system_category()), "boost::process::child::wait: GetExitCodeProcess failed")); 
-        return status(code); 
-#endif 
-    } 
+    /** Move-Constructor.*/
+    child(child && lhs);
 
-    /** 
-     * Creates a new child object that represents the just spawned child 
-     * process \a id. 
-     * 
-     * The \a fhstdin, \a fhstdout and \a fhstderr file handles represent 
-     * the parent's handles used to communicate with the corresponding 
-     * data streams. They needn't be valid but their availability must 
-     * match the redirections configured by the launcher that spawned this 
-     * process. 
-     * 
-     * The \a fhprocess handle represents a handle to the child process. 
-     * It is only used on Windows as the implementation of wait() needs a 
-     * process handle. 
-     */ 
-    child(id_type id, detail::file_handle fhstdin, detail::file_handle fhstdout, detail::file_handle fhstderr, detail::file_handle fhprocess = detail::file_handle()) 
-        : process(id) 
-#if defined(BOOST_WINDOWS_API) 
-        , process_handle_(fhprocess.release(), ::CloseHandle) 
-#endif 
-    { 
-        if (fhstdin.valid()) 
-            stdin_.reset(new postream(fhstdin)); 
-        if (fhstdout.valid()) 
-            stdout_.reset(new pistream(fhstdout)); 
-        if (fhstderr.valid()) 
-            stderr_.reset(new pistream(fhstderr)); 
-    } 
+    /** Construct a child from a property list and launch it
+     * The standard version is to create a subprocess, which will spawn the process.
+     */
+    template<typename ...Args>
+    explicit child(Args&&...args);
 
-private: 
-    /** 
-     * The standard input stream attached to the child process. 
-     * 
-     * This postream object holds the communication channel with the 
-     * child's process standard input. It is stored in a pointer because 
-     * this field is only valid when the user requested to redirect this 
-     * data stream. 
-     */ 
-    boost::shared_ptr<postream> stdin_; 
+    /** Construct an empty child. */
+    child() = default;
 
-    /** 
-     * The standard output stream attached to the child process. 
-     * 
-     * This postream object holds the communication channel with the 
-     * child's process standard output. It is stored in a pointer because 
-     * this field is only valid when the user requested to redirect this 
-     * data stream. 
-     */ 
-    boost::shared_ptr<pistream> stdout_; 
+    /** Move assign. */
+    child& operator=(child && lhs);
 
-    /** 
-     * The standard error stream attached to the child process. 
-     * 
-     * This postream object holds the communication channel with the 
-     * child's process standard error. It is stored in a pointer because 
-     * this field is only valid when the user requested to redirect this 
-     * data stream. 
-     */ 
-    boost::shared_ptr<pistream> stderr_; 
+    /** Detach the child, i.e. let it run after this handle dies. */
+    void detach();
+    /** Join the child. This just calls wait, but that way the naming is similar to std::thread */
+    void join();
+    /** Check if the child is joinable. */
+    bool joinable();
 
-#if defined(BOOST_WINDOWS_API) 
-    /** 
-     * Process handle owned by RAII object. 
-     */ 
-    boost::shared_ptr<void> process_handle_; 
-#endif 
-}; 
+    /** Destructor.
+     * @attention Will call terminate (without warning) when the child was neither joined nor detached.
+     */
+    ~child();
 
-/** 
- * Collection of child objects. 
- * 
- * This convenience type represents a collection of child objects backed 
- * by a vector. 
- */ 
-typedef std::vector<child> children; 
+    /** Get the native handle for the child process. */
+    native_handle_t native_handle() const;
 
-} 
-} 
+    /** Get the exit_code. The return value is without any meaning if the child wasn't waited for or if it was terminated. */
+    int exit_code() const;
+    /** Get the Process Identifier. */
+    pid_t id()      const;
 
-#endif 
+    /** Get the native, uninterpreted exit code. The return value is without any meaning if the child wasn't waited
+     *  for or if it was terminated. */
+    int native_exit_code() const;
+
+    /** Check if the child process is running. */
+    bool running();
+    /** \overload void running() */
+    bool running(std::error_code & ec) noexcept;
+
+    /** Wait for the child process to exit. */
+    void wait();
+    /** \overload void wait() */
+    void wait(std::error_code & ec) noexcept;
+
+    /** Wait for the child process to exit for a period of time.
+     * \return True if child exited while waiting.
+     */
+    template< class Rep, class Period >
+    bool wait_for  (const std::chrono::duration<Rep, Period>& rel_time);
+    /** \overload bool wait_for(const std::chrono::duration<Rep, Period>& rel_time) */
+    bool wait_for  (const std::chrono::duration<Rep, Period>& rel_time, std::error_code & ec) noexcept;
+
+    /** Wait for the child process to exit until a point in time.
+      * \return True if child exited while waiting.*/
+    template< class Clock, class Duration >
+    bool wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time );
+    /** \overload bool wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time )*/
+    bool wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time, std::error_code & ec) noexcept;
+
+    /** Check if this handle holds a child process.
+     * @note That does not mean, that the process is still running. It only means, that the handle does or did exist.
+     */
+    bool valid() const;
+    /** Same as valid, for convenience. */
+    explicit operator bool() const;
+
+    /** Check if the the chlid process is in any process group. */
+    bool in_group() const;
+
+    /** \overload bool in_group() const */
+    bool in_group(std::error_code & ec) const noexcept;
+
+    /** Terminate the child process.
+     *
+     *  This function will cause the child process to unconditionally and immediately exit.
+     *  It is implement with [SIGKILL](http://pubs.opengroup.org/onlinepubs/009695399/functions/kill.html) on posix
+     *  and [TerminateProcess](https://technet.microsoft.com/en-us/library/ms686714.aspx) on windows.
+     *
+     */
+    void terminate();
+
+    /** \overload void terminate() */
+    void terminate(std::error_code & ec) noexcept;
+};
+
+#endif
+
+}}
+#endif
+

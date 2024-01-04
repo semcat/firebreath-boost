@@ -87,7 +87,7 @@ struct ct_rounded_size
 };
 
 // Gennaro Prota wrote this. Thanks!
-template <int p, int n = 4>
+template <std::size_t p, std::size_t n = 4>
 struct ct_max_pow2_less
 {
    static const std::size_t c = 2*n < p;
@@ -156,29 +156,29 @@ BOOST_INTERPROCESS_FORCEINLINE bool size_overflows(SizeType count)
    return multiplication_overflows(SizeType(SztSizeOfType), count);
 }
 
-template<class RawPointer>
-class pointer_uintptr_caster;
+template<class RawPointer, class OffsetType>
+class pointer_offset_caster;
 
-template<class T>
-class pointer_uintptr_caster<T*>
+template<class T, class OffsetType>
+class pointer_offset_caster<T*, OffsetType>
 {
    public:
-   BOOST_INTERPROCESS_FORCEINLINE explicit pointer_uintptr_caster(uintptr_t sz)
-      : m_uintptr(sz)
+   BOOST_INTERPROCESS_FORCEINLINE explicit pointer_offset_caster(OffsetType off)
+      : m_offset(off)
    {}
 
-   BOOST_INTERPROCESS_FORCEINLINE explicit pointer_uintptr_caster(const volatile T *p)
-      : m_uintptr(reinterpret_cast<uintptr_t>(p))
+   BOOST_INTERPROCESS_FORCEINLINE explicit pointer_offset_caster(const volatile T *p)
+      : m_offset(reinterpret_cast<OffsetType>(p))
    {}
 
-   BOOST_INTERPROCESS_FORCEINLINE uintptr_t uintptr() const
-   {   return m_uintptr;   }
+   BOOST_INTERPROCESS_FORCEINLINE OffsetType offset() const
+   {   return m_offset;   }
 
    BOOST_INTERPROCESS_FORCEINLINE T* pointer() const
-   {   return reinterpret_cast<T*>(m_uintptr);   }
+   {   return reinterpret_cast<T*>(m_offset);   }
 
    private:
-   uintptr_t m_uintptr;
+   OffsetType m_offset;
 };
 
 
